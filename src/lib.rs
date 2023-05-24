@@ -15,7 +15,7 @@ use std::mem;
 use std::ffi::CString;
 
 pub struct Display {
-    raw: *mut xlib::Display,
+    pub raw: *mut xlib::Display,
 }
 
 impl Display {
@@ -30,10 +30,23 @@ impl Display {
     pub fn sync(&self) {
         unsafe { xlib::XSync(self.raw, xlib::False as _) };
     }
+
+    pub fn dimensions(&self) -> ( u32, u32 ) {
+        ( unsafe {xlib::XDisplayWidth(self.raw, 0) } as u32, unsafe { xlib::XDisplayHeight(self.raw, 0) } as u32 )
+    }
+
+    pub fn width(&self) -> u32 {
+        unsafe { xlib::XDisplayWidth(self.raw, 0) as u32 }
+    }
+
+    pub fn height(&self) -> u32 {
+        unsafe { xlib::XDisplayHeight(self.raw, 0) as u32 }
+    }
 }
 
 impl Drop for Display {
     fn drop(&mut self) {
+        println!("Display dropped");
         unsafe { xlib::XCloseDisplay(self.raw) };
     }
 }
@@ -102,6 +115,58 @@ impl<'a> Window<'a> {
         })
     }
 
+    pub fn create_simple(display: &'a Display, width: u32, height: u32) -> Result<Self, X11Error> {
+        let screen_num = unsafe { xlib::XDefaultScreen(display.raw) };
+        let root_wnd_id = unsafe { xlib::XRootWindow(display.raw, screen_num) };
+
+        let window_id = unsafe {
+            xlib::XCreateSimpleWindow(
+                display.raw,
+                root_wnd_id,
+                0,
+                0,
+                width,
+                height,
+                xlib::InputOutput,
+                0,
+                0,
+            )
+        };
+        if window_id == 0 {
+            Err("create window")?;
+        }
+
+        let wm_protocols;
+        let wm_delete_window;
+        unsafe {
+            wm_protocols = xlib::XInternAtom(display.raw, cstr!("WM_PROTOCOLS"), xlib::False as _);
+            wm_delete_window =
+                xlib::XInternAtom(display.raw, cstr!("WM_DELETE_WINDOW"), xlib::False as _);
+            let mut protocols = [wm_delete_window];
+            xlib::XSetWMProtocols(
+                display.raw,
+                window_id,
+                protocols.as_mut_ptr(),
+                protocols.len() as _,
+            );
+            xlib::XSelectInput(
+                display.raw,
+                window_id,
+                c_long::from(
+                    xlib::ExposureMask | xlib::KeyPressMask | xlib::ButtonPressMask
+                        | xlib::StructureNotifyMask,
+                ),
+            );
+        }
+
+        Ok(Window {
+            display,
+            window_id,
+            wm_protocols,
+            wm_delete_window,
+        })
+    }
+
     pub fn set_title(&self, title: &str) {
         let title_str = CString::new(title).unwrap();
         unsafe { xlib::XStoreName(self.display.raw, self.window_id, title_str.as_ptr()) };
@@ -116,6 +181,7 @@ impl<'a> Window<'a> {
         let mut event: xlib::XEvent = unsafe { mem::zeroed() };
 
         unsafe {
+            #[allow(clippy::collapsible_if)]
             if xlib::XCheckTypedWindowEvent(
                 self.display.raw,
                 self.window_id,

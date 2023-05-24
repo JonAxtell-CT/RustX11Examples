@@ -18,7 +18,7 @@ fn main() {
 
     // Configure bindgen
     let mut config = bindgen::Builder::default()
-        .rust_target(RustTarget::Stable_1_21)
+        .rust_target(RustTarget::Stable_1_68)
         .header("wrapper.h");
 
     if target.contains("apple") {
